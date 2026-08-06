@@ -53,3 +53,16 @@ pub(super) fn definitions(has_experiment: Option<bool>, gate: bool) -> LocalEval
         minimal_flag_called_events: gate,
     }
 }
+
+/// Definitions for a locally-true flag whose manifest attaches `payload` under
+/// the boolean `"true"` outcome key.
+pub(super) fn definitions_with_payload(payload: serde_json::Value) -> LocalEvaluationResponse {
+    let mut flag = gated_flag(Some(false));
+    flag.filters.payloads = HashMap::from([("true".to_string(), payload)]);
+    LocalEvaluationResponse {
+        flags: vec![flag],
+        group_type_mapping: HashMap::new(),
+        cohorts: HashMap::new(),
+        minimal_flag_called_events: false,
+    }
+}

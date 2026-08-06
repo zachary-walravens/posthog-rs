@@ -1249,3 +1249,89 @@ fn test_legacy_cohort_shape_still_supported() {
     assert_eq!(cohort.id, "42");
     assert_eq!(cohort.name, "Legacy Cohort");
 }
+
+/// Payloads ride along in the definitions manifest under `filters.payloads`,
+/// keyed by evaluation outcome. A boolean flag keys its payload by `"true"`.
+#[test]
+fn test_boolean_flag_payload_resolves_from_definitions() {
+    let body = json!({
+        "flags": [{
+            "id": 1,
+            "key": "bool-flag",
+            "name": "Bool Flag",
+            "active": true,
+            "filters": {
+                "groups": [{ "properties": [], "rollout_percentage": 100 }],
+                "payloads": { "true": {"color": "blue"} }
+            }
+        }]
+    });
+
+    let response: LocalEvaluationResponse = serde_json::from_value(body).unwrap();
+    let flag = &response.flags[0];
+
+    assert_eq!(
+        flag.payload_for(&FlagValue::Boolean(true)),
+        Some(json!({"color": "blue"}))
+    );
+    // A flag that evaluated to false has no payload, matching remote behavior.
+    assert_eq!(flag.payload_for(&FlagValue::Boolean(false)), None);
+}
+
+/// A multivariate flag keys each payload by variant key, so only the variant the
+/// user actually landed in should resolve.
+#[test]
+fn test_multivariate_flag_payload_resolves_per_variant() {
+    let body = json!({
+        "flags": [{
+            "id": 2,
+            "key": "variant-flag",
+            "name": "Variant Flag",
+            "active": true,
+            "filters": {
+                "groups": [{ "properties": [], "rollout_percentage": 100 }],
+                "multivariate": { "variants": [
+                    { "key": "control", "rollout_percentage": 50 },
+                    { "key": "test", "rollout_percentage": 50 }
+                ]},
+                "payloads": {
+                    "control": {"variant": "a"},
+                    "test": {"variant": "b"}
+                }
+            }
+        }]
+    });
+
+    let response: LocalEvaluationResponse = serde_json::from_value(body).unwrap();
+    let flag = &response.flags[0];
+
+    assert_eq!(
+        flag.payload_for(&FlagValue::String("control".into())),
+        Some(json!({"variant": "a"}))
+    );
+    assert_eq!(
+        flag.payload_for(&FlagValue::String("test".into())),
+        Some(json!({"variant": "b"}))
+    );
+    // An unknown variant has no payload rather than falling back to another.
+    assert_eq!(flag.payload_for(&FlagValue::String("other".into())), None);
+}
+
+/// A flag with no `payloads` entry at all must stay `None`, not panic or invent one.
+#[test]
+fn test_flag_without_payloads_resolves_none() {
+    let body = json!({
+        "flags": [{
+            "id": 3,
+            "key": "no-payload",
+            "name": "No Payload",
+            "active": true,
+            "filters": { "groups": [{ "properties": [], "rollout_percentage": 100 }] }
+        }]
+    });
+
+    let response: LocalEvaluationResponse = serde_json::from_value(body).unwrap();
+    let flag = &response.flags[0];
+    assert_eq!(flag.payload_for(&FlagValue::Boolean(true)), None);
+    assert_eq!(flag.payload_for(&FlagValue::String("control".into())), None);
+}

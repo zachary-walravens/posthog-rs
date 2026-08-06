@@ -1287,7 +1287,9 @@ impl Drop for Client {
 #[cfg(test)]
 mod minimal_gate_tests {
     use super::*;
-    use crate::client::minimal_gate_test_support::{definitions, RecordingHost};
+    use crate::client::minimal_gate_test_support::{
+        definitions, definitions_with_payload, RecordingHost,
+    };
 
     fn test_client(cache: FlagCache, host: Arc<dyn FeatureFlagEvaluationsHost>) -> Client {
         let options = ClientOptions::from(("phc_test", "http://localhost:0"));
@@ -1316,6 +1318,41 @@ mod minimal_gate_tests {
                 },
             )
             .expect("local evaluate_flags")
+    }
+
+    /// Feature flag payloads ride along in the local-evaluation definitions
+    /// manifest, so a purely locally-evaluated snapshot must surface them
+    /// without any `/flags` round-trip.
+    #[test]
+    fn local_evaluation_surfaces_flag_payload_from_definitions() {
+        let cache = FlagCache::new();
+        cache.update(definitions_with_payload(json!({"color": "blue"})));
+        let host = Arc::new(RecordingHost::default());
+        let client = test_client(cache, Arc::clone(&host) as _);
+
+        let snapshot = evaluate(&client);
+
+        assert!(snapshot.is_enabled("gated"));
+        assert_eq!(
+            snapshot.get_flag_payload("gated"),
+            Some(json!({"color": "blue"})),
+            "payload from filters.payloads must reach the snapshot"
+        );
+    }
+
+    /// A flag whose manifest carries no payload must resolve to `None` rather
+    /// than inheriting another flag's payload or panicking.
+    #[test]
+    fn local_evaluation_without_payload_yields_none() {
+        let cache = FlagCache::new();
+        cache.update(definitions(Some(false), false));
+        let host = Arc::new(RecordingHost::default());
+        let client = test_client(cache, Arc::clone(&host) as _);
+
+        let snapshot = evaluate(&client);
+
+        assert!(snapshot.is_enabled("gated"));
+        assert_eq!(snapshot.get_flag_payload("gated"), None);
     }
 
     /// The minimization gate must be pinned to the definitions snapshot that
