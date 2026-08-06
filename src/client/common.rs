@@ -276,6 +276,7 @@ pub(super) fn local_record(
     value: FlagValue,
     has_experiment: Option<bool>,
     minimal_flag_called_events: bool,
+    payload: Option<serde_json::Value>,
 ) -> EvaluatedFlagRecord {
     let (enabled, variant) = match value {
         FlagValue::Boolean(b) => (b, None),
@@ -284,8 +285,7 @@ pub(super) fn local_record(
     EvaluatedFlagRecord {
         enabled,
         variant,
-        // Local definitions do not surface a payload through the poller today.
-        payload: None,
+        payload,
         id: None,
         version: None,
         reason: Some("Evaluated locally".to_string()),

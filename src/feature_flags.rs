@@ -110,6 +110,25 @@ pub struct FeatureFlag {
     pub has_experiment: Option<bool>,
 }
 
+impl FeatureFlag {
+    /// Resolve the JSON payload this flag's definitions attach to `value`, if any.
+    ///
+    /// The local-evaluation definitions carry payloads in `filters.payloads`,
+    /// keyed by evaluation outcome rather than by flag key: a multivariate flag
+    /// keys each payload by variant key, and a boolean flag keys its payload by
+    /// the string `"true"`. A flag that evaluated to `false` has no payload —
+    /// this mirrors the remote `/flags` behavior, where `metadata.payload` is
+    /// only populated for a flag that matched.
+    pub fn payload_for(&self, value: &FlagValue) -> Option<serde_json::Value> {
+        let key = match value {
+            FlagValue::String(variant) => variant.as_str(),
+            FlagValue::Boolean(true) => "true",
+            FlagValue::Boolean(false) => return None,
+        };
+        self.filters.payloads.get(key).cloned()
+    }
+}
+
 /// Targeting rules and configuration for a feature flag.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FeatureFlagFilters {

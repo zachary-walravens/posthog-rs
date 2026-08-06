@@ -1050,9 +1050,10 @@ impl Client {
                 }
                 if let Ok(value) = result {
                     let has_experiment = evaluator.cache().has_experiment(&key);
+                    let payload = evaluator.cache().payload_for(&key, &value);
                     records.insert(
                         key.clone(),
-                        local_record(value, has_experiment, local_minimal_gate),
+                        local_record(value, has_experiment, local_minimal_gate, payload),
                     );
                     locally_evaluated_keys.insert(key);
                 }

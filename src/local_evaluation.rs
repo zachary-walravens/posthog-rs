@@ -224,6 +224,19 @@ impl FlagCache {
             .and_then(|f| f.has_experiment)
     }
 
+    /// Resolve the payload a cached flag's definitions attach to `value`,
+    /// without cloning the full [`FeatureFlag`].
+    ///
+    /// Returns `None` when the flag is not cached or has no payload for that
+    /// outcome. See [`FeatureFlag::payload_for`] for the keying rules.
+    pub(crate) fn payload_for(&self, key: &str, value: &FlagValue) -> Option<serde_json::Value> {
+        self.flags
+            .read()
+            .unwrap()
+            .get(key)
+            .and_then(|f| f.payload_for(value))
+    }
+
     /// Return all cached feature flag definitions.
     pub fn get_all_flags(&self) -> Vec<FeatureFlag> {
         self.flags.read().unwrap().values().cloned().collect()
