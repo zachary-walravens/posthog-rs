@@ -285,7 +285,9 @@ pub(super) fn local_record(
     EvaluatedFlagRecord {
         enabled,
         variant,
-        payload,
+        // `filters.payloads` stores each payload as a JSON-encoded string, so the
+        // local path needs the same normalization the remote one applies.
+        payload: payload.map(normalize_payload),
         id: None,
         version: None,
         reason: Some("Evaluated locally".to_string()),

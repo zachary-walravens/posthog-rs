@@ -1362,6 +1362,58 @@ mod minimal_gate_tests {
         );
     }
 
+    /// Real definitions store payloads as JSON-encoded strings, so the local
+    /// path must parse them the way the remote one does — otherwise callers get
+    /// a `Value::String` and every field lookup on it misses.
+    #[tokio::test]
+    async fn local_evaluation_normalizes_string_encoded_payload() {
+        let cache = FlagCache::new();
+        cache.update(definitions_with_payload(json!(
+            "{\n  \"feature_flag_key\": \"other-flag\"\n}"
+        )));
+        let host = Arc::new(RecordingHost::default());
+        let client = test_client(cache, Arc::clone(&host) as _);
+
+        let snapshot = evaluate(&client).await;
+
+        assert_eq!(
+            snapshot.get_flag_payload("gated"),
+            Some(json!({"feature_flag_key": "other-flag"})),
+            "JSON-encoded string payload must be parsed, not returned as a string"
+        );
+    }
+
+    /// A payload string that isn't a JSON object still parses via serde, so a
+    /// bare numeric payload lands as a number rather than being dropped.
+    #[tokio::test]
+    async fn local_evaluation_parses_scalar_string_payload() {
+        let cache = FlagCache::new();
+        cache.update(definitions_with_payload(json!("250")));
+        let host = Arc::new(RecordingHost::default());
+        let client = test_client(cache, Arc::clone(&host) as _);
+
+        let snapshot = evaluate(&client).await;
+
+        assert_eq!(snapshot.get_flag_payload("gated"), Some(json!(250)));
+    }
+
+    /// A payload string that isn't valid JSON at all falls back to the raw
+    /// string rather than dropping the payload.
+    #[tokio::test]
+    async fn local_evaluation_keeps_unparseable_payload_as_string() {
+        let cache = FlagCache::new();
+        cache.update(definitions_with_payload(json!("not json at all")));
+        let host = Arc::new(RecordingHost::default());
+        let client = test_client(cache, Arc::clone(&host) as _);
+
+        let snapshot = evaluate(&client).await;
+
+        assert_eq!(
+            snapshot.get_flag_payload("gated"),
+            Some(json!("not json at all"))
+        );
+    }
+
     /// A flag whose manifest carries no payload must resolve to `None` rather
     /// than inheriting another flag's payload or panicking.
     #[tokio::test]
