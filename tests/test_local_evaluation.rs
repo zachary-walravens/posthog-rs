@@ -1160,3 +1160,92 @@ fn test_group_condition_uses_group_key_for_bucketing() {
         .unwrap();
     assert_eq!(result, Some(FlagValue::Boolean(false)));
 }
+
+/// The local evaluation API keys cohorts by ID and uses the property-filter
+/// group as the value, with no `id` or `name` field. Deserialization used to
+/// fail on this and discard the entire response, flags included.
+#[test]
+fn test_api_shaped_cohorts_deserialize_with_id_from_key() {
+    let body = json!({
+        "flags": [{
+            "id": 1,
+            "key": "flag-with-cohort",
+            "name": "Flag With Cohort",
+            "active": true,
+            "filters": { "groups": [] }
+        }],
+        "group_type_mapping": {},
+        "cohorts": {
+            "294848": {
+                "type": "OR",
+                "values": [{
+                    "type": "AND",
+                    "values": [{
+                        "type": "person",
+                        "key": "email",
+                        "value": "test@example.com",
+                        "operator": "exact"
+                    }]
+                }]
+            }
+        }
+    });
+
+    let response: LocalEvaluationResponse = serde_json::from_value(body).unwrap();
+    assert_eq!(response.flags.len(), 1);
+    assert_eq!(response.cohorts.len(), 1);
+
+    let cache = FlagCache::new();
+    cache.update(response);
+
+    let definitions = cache.get_cohort_definitions();
+    let cohort = definitions.get("294848").expect("cohort should be cached");
+    assert_eq!(cohort.id, "294848");
+
+    let properties = cohort.parse_properties();
+    assert_eq!(properties.len(), 1);
+    assert_eq!(properties[0].key, "email");
+}
+
+/// A single malformed cohort must not take the rest of the response with it.
+#[test]
+fn test_malformed_cohort_is_skipped_without_discarding_response() {
+    let body = json!({
+        "flags": [{
+            "id": 1,
+            "key": "flag-a",
+            "name": "Flag A",
+            "active": true,
+            "filters": { "groups": [] }
+        }],
+        "cohorts": {
+            "1": { "type": "OR", "values": [] },
+            "2": "not-a-cohort"
+        }
+    });
+
+    let response: LocalEvaluationResponse = serde_json::from_value(body).unwrap();
+    assert_eq!(response.flags.len(), 1);
+    assert_eq!(response.cohorts.len(), 1);
+    assert!(response.cohorts.contains_key("1"));
+}
+
+/// The legacy `{id, name, properties}` shape still deserializes.
+#[test]
+fn test_legacy_cohort_shape_still_supported() {
+    let body = json!({
+        "flags": [],
+        "cohorts": {
+            "42": {
+                "id": "42",
+                "name": "Legacy Cohort",
+                "properties": { "type": "AND", "values": [] }
+            }
+        }
+    });
+
+    let response: LocalEvaluationResponse = serde_json::from_value(body).unwrap();
+    let cohort = response.cohorts.get("42").unwrap();
+    assert_eq!(cohort.id, "42");
+    assert_eq!(cohort.name, "Legacy Cohort");
+}

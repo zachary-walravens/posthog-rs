@@ -64,7 +64,7 @@ pub struct LocalEvaluationResponse {
     #[serde(default)]
     pub group_type_mapping: HashMap<String, String>,
     /// Cohort definitions for evaluating cohort membership
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_cohorts")]
     pub cohorts: HashMap<String, Cohort>,
     /// Server-controlled gate: when `true`, `$feature_flag_called` events for
     /// non-experiment flags evaluated from these definitions are minimized to a
@@ -80,11 +80,70 @@ pub struct LocalEvaluationResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cohort {
     /// Unique identifier for this cohort
+    #[serde(default)]
     pub id: String,
-    /// Human-readable name of the cohort
+    /// Human-readable name of the cohort. The local evaluation API does not
+    /// return cohort names, so this is usually empty.
+    #[serde(default)]
     pub name: String,
     /// Property filters that define cohort membership
+    #[serde(default)]
     pub properties: serde_json::Value,
+}
+
+/// Deserialize the `cohorts` map from the local evaluation API.
+///
+/// The API keys cohorts by ID and uses the property-filter group itself as the
+/// value — `{"294848": {"type": "OR", "values": [...]}}` — so `id` comes from
+/// the map key rather than from a field, and there is no `name` at all. A
+/// straight `HashMap<String, Cohort>` derive fails with `missing field 'id'`,
+/// which previously discarded the entire response (flags included) for any
+/// project with at least one cohort.
+///
+/// A legacy `{id, name, properties}` value is still accepted, and an entry that
+/// fits neither shape is skipped with a warning rather than failing the whole
+/// response.
+fn deserialize_cohorts<'de, D>(deserializer: D) -> Result<HashMap<String, Cohort>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = HashMap::<String, serde_json::Value>::deserialize(deserializer)?;
+    let mut cohorts = HashMap::with_capacity(raw.len());
+
+    for (key, value) in raw {
+        // Legacy shape: the value already carries its own id/properties.
+        let is_legacy = value
+            .as_object()
+            .is_some_and(|o| o.contains_key("id") && o.contains_key("properties"));
+
+        let cohort = if is_legacy {
+            match serde_json::from_value::<Cohort>(value) {
+                Ok(mut cohort) => {
+                    if cohort.id.is_empty() {
+                        cohort.id = key.clone();
+                    }
+                    cohort
+                }
+                Err(e) => {
+                    warn!(cohort_id = %key, error = %e, "Skipping malformed cohort definition");
+                    continue;
+                }
+            }
+        } else if value.is_object() || value.is_array() {
+            Cohort {
+                id: key.clone(),
+                name: String::new(),
+                properties: value,
+            }
+        } else {
+            warn!(cohort_id = %key, "Skipping cohort definition with unexpected shape");
+            continue;
+        };
+
+        cohorts.insert(key, cohort);
+    }
+
+    Ok(cohorts)
 }
 
 /// Thread-safe cache for feature flag definitions.
